@@ -477,7 +477,10 @@ function parseCSV(text){
   for(const line of text.trim().split('\n')){
     const p=line.split(',').map(s=>s.trim());
     if(p.length<3) continue;
-    const[ym,label,vs]=p;
+    // 金額に桁区切りカンマが含まれる場合(例: 250,000)に備え、
+    // 3列目以降をすべて金額フィールドとして連結する
+    const[ym,label,...rest]=p;
+    const vs=rest.join(',');
     if(!/^\d{4}-\d{2}B?$/.test(ym)) continue;
     if(!ms[ym]) ms[ym]={items:{},raw:[]};
     const val=parseFloat(vs.replace(/,/g,''));

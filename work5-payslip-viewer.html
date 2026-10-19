@@ -133,6 +133,13 @@ body {
 .ch-up { color: var(--up); font-size: 0.72rem; }
 .ch-dn { color: var(--down); font-size: 0.72rem; }
 .ch-z { color: var(--fg-muted); font-size: 0.72rem; }
+.flag { padding: 0.5rem 0.7rem; border-radius: 8px; font-size: 0.8rem; margin-bottom: 0.4rem; }
+.flag:last-child { margin-bottom: 0; }
+.flag-crit { background: var(--down-soft); color: var(--down); }
+.flag-warn { background: var(--warn-soft); color: var(--warn); }
+.flag-info { background: var(--accent-soft); color: var(--accent); }
+.flag-ok { background: var(--up-soft); color: var(--up); }
+.flags-note { padding: 0 0.85rem 0.85rem; font-size: 0.7rem; color: var(--fg-muted); }
 .chart-box { padding: 0.85rem; position: relative; height: 270px; }
 .tabs { display: flex; gap: 0.2rem; padding: 0.4rem 0.85rem 0; }
 .tab {
@@ -182,6 +189,13 @@ body {
   <div id="statsEl" hidden>
     <div class="sec-lbl" style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">サマリー<select id="statsSel" style="font-family:inherit;font-size:0.78rem;padding:0.2rem 0.4rem;border:1px solid var(--border);border-radius:6px;background:var(--surface);color:var(--fg);cursor:pointer;"></select></div>
     <div class="stats" id="statsGrid"></div>
+  </div>
+  <div id="flagsEl" hidden>
+    <div class="card">
+      <div class="card-h"><h2>チェック（先月との比較）</h2></div>
+      <div class="flags-body" id="flagsBody" style="padding:0.85rem"></div>
+      <div class="flags-note">ここに表示されるのは、ルールに基づく「確認の提案」であり、断定ではありません。最終的な判断はご自身で行ってください。</div>
+    </div>
   </div>
   <div id="chartEl" hidden>
     <div class="card">
@@ -559,6 +573,76 @@ function updateStats(){
     const val=lat?lat.items[c.k]:null, pv=prv?prv.items[c.k]:null;
     return `<div class="st"><div class="st-lbl">${c.l}</div><div class="st-val">${val!=null?'¥'+fmt(val):'-'}</div><div class="st-chg">${fmtChg(val,pv)}</div></div>`;
   }).join('');
+  renderFlags(ym);
+}
+
+// ====================================================================
+// チェック（先月との比較・自動フラグ）
+// 作品4(つきあわせ)の「要対応／要確認／参考」という考え方を踏襲。
+// ここでの判定はあくまでルールに基づく提案であり、断定ではない。
+// ====================================================================
+const CHECK_RULES = {
+  netPayDropYen: 5000,   // 手取りがこの金額以上減ったら要確認
+  netPayDropPct: 0.05,   // または前月比この割合以上減ったら要確認
+  socialInsDeltaYen: 1000, // 社会保険料合計がこの金額以上変わったら要確認
+};
+
+function checkChanges(ym){
+  if(/B$/.test(ym)) return []; // 賞与(ボーナス)月は通常月と比較対象が異なるため対象外
+  const sorted=Object.keys(S.months).filter(k=>!/B$/.test(k)).sort();
+  const idx=sorted.indexOf(ym);
+  if(idx<=0) return [];
+  const lat=S.months[ym], prv=S.months[sorted[idx-1]];
+  const g=(m,k)=>(m&&m.items[k]!=null)?m.items[k]:null;
+  const flags=[];
+
+  // 手取り（差引支給額）の大幅な減少
+  const net=g(lat,'totals.net_pay'), pnet=g(prv,'totals.net_pay');
+  if(net!=null&&pnet!=null&&pnet>0){
+    const d=net-pnet;
+    if(d<0 && (Math.abs(d)>=CHECK_RULES.netPayDropYen || Math.abs(d)/pnet>=CHECK_RULES.netPayDropPct)){
+      flags.push({level:'warn',label:'要確認',text:`手取り（差引支給額）が前月より ${fmt(Math.abs(d))}円 減っています`});
+    }
+  }
+  // 基本給の変化（昇給・降給の可能性）
+  const base=g(lat,'earnings.basic_salary'), pbase=g(prv,'earnings.basic_salary');
+  if(base!=null&&pbase!=null&&base!==pbase){
+    flags.push({level:'crit',label:'要確認',text:`基本給が前月と異なります（${fmt(pbase)}円 → ${fmt(base)}円）。昇給・降給の可能性があります`});
+  }
+  // 社会保険料合計の変化
+  const soc=g(lat,'deductions.social_total'), psoc=g(prv,'deductions.social_total');
+  if(soc!=null&&psoc!=null){
+    const d=soc-psoc;
+    if(Math.abs(d)>=CHECK_RULES.socialInsDeltaYen){
+      flags.push({level:'warn',label:'要確認',text:`社会保険料合計が前月と ${fmt(Math.abs(d))}円 違います`});
+    }
+  }
+  // 住民税の変化（例年6月に改定されるため、6月以外での変化を参考情報として表示）
+  const mn=parseInt(ym.split('-')[1]);
+  const rtax=g(lat,'deductions.resident_tax'), prtax=g(prv,'deductions.resident_tax');
+  if(rtax!=null&&prtax!=null&&rtax!==prtax&&mn!==6){
+    flags.push({level:'info',label:'参考',text:`住民税が前月と異なります（${fmt(prtax)}円 → ${fmt(rtax)}円）。通常は6月に変わります`});
+  }
+  return flags;
+}
+
+function renderFlags(ym){
+  const el=document.getElementById('flagsEl');
+  const body=document.getElementById('flagsBody');
+  if(!el||!body) return;
+  if(!ym||/B$/.test(ym)){el.hidden=true;return;} // 賞与月はチェック対象外
+  const sorted=Object.keys(S.months).filter(k=>!/B$/.test(k)).sort();
+  if(!sorted.length||sorted.indexOf(ym)<=0){el.hidden=true;return;}
+  el.hidden=false;
+  const flags=checkChanges(ym);
+  if(!flags.length){
+    body.innerHTML='<div class="flag flag-ok">🟢 気になる変化は見つかりませんでした</div>';
+    return;
+  }
+  const icon={crit:'🔴',warn:'🟠',info:'🔵'};
+  body.innerHTML=flags.map(f=>
+    `<div class="flag flag-${f.level}">${icon[f.level]} <b>${f.label}</b>：${f.text}</div>`
+  ).join('');
 }
 
 function renderTable(){

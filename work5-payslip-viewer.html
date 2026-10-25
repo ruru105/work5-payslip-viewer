@@ -1,3 +1,8 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>給料明細ビューア</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@300;400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap">
 <style>
@@ -511,6 +516,12 @@ function parseCSV(text){
 // ====================================================================
 // Rendering
 // ====================================================================
+// CSV・PDFから読み取った文字をHTMLとして解釈させないための変換
+function esc(v){
+  return String(v==null?'':v).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+    .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 function fmt(n){
   if(n==null) return '-';
   if(Number.isInteger(n)||n>100) return n.toLocaleString('ja-JP');
@@ -682,7 +693,7 @@ function renderTable(){
     h+=`<tr class="cat"><td colspan="${sorted.length+(sorted.length>1?2:1)}">その他</td></tr>`;
     for(const k of [...um].sort()){
       const lbl=k.replace('_unmapped.','').replace('_detail.','');
-      h+=`<tr><td class="sub">${lbl}</td>`;
+      h+=`<tr><td class="sub">${esc(lbl)}</td>`;
       for(const m of ms) h+=`<td>${fmt(m.items[k])}</td>`;
       if(sorted.length>1){
         const la=ms[ms.length-1].items[k],pr=ms[ms.length-2].items[k];
@@ -797,7 +808,7 @@ async function handleFiles(files){
         console.error('PDF parse error:',e);
         const el=document.getElementById('emptyEl');
         el.hidden=false;
-        el.innerHTML=`<p style="color:var(--down)">PDFの読み取りに失敗しました</p><p>${e.message}</p>`;
+        el.innerHTML=`<p style="color:var(--down)">PDFの読み取りに失敗しました</p><p>${esc(e.message)}</p>`;
       }
     }
   }
